@@ -61,10 +61,12 @@ th,td{text-align:right;padding:7px 5px;border-bottom:1px solid var(--line);white
 <div><label for="rv">Vehicle</label><select id="rv"></select></div>
 <div><label for="ri">Freight offered</label><input type="number" id="ri" min="0" inputmode="decimal"></div>
 </div>
+<div class="row"><div style="flex:1 1 260px"><label for="rtx">Type a whole route</label><input id="rtx" placeholder="Karachi to Lahore via Hyderabad, Sukkur, Multan"></div><button class="p" id="rtb" type="button">Find route from text</button></div>
 <div class="row"><div style="flex:1 1 220px"><label for="rsq">Search a place and add it</label><input id="rsq" placeholder="e.g. Hyderabad"></div><button class="a" id="rsb" type="button">Add place</button></div>
 <p class="mu">You can also tap the map to add a point. First point = start, last point = destination, points in between = stops.</p>
 <div id="map" style="height:320px;border:1px solid var(--line);border-radius:6px;margin-bottom:8px"></div>
 <div id="plist"></div>
+<div id="srl"></div>
 <div class="row"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ropt" style="width:auto"> Let the app choose the best order of the stops</label></div>
 <div class="row"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rr" style="width:auto"> Return trip empty (count cost both ways)</label></div>
 <div class="row"><button class="p" id="rgo">Find routes</button> <a class="a" id="gm" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:none">Open in Google Maps</a></div>
@@ -114,8 +116,9 @@ th,td{text-align:right;padding:7px 5px;border-bottom:1px solid var(--line);white
 <div><label for="su">Distance unit</label><select id="su"><option value="km">Kilometres</option><option value="mi">Miles</option></select></div>
 <div><label for="sh">Driver cost per hour</label><input type="number" id="sh" min="0" inputmode="decimal"></div>
 <div><label for="ss">Truck slowdown factor</label><input type="number" id="ss" min="1" step="0.1" inputmode="decimal"></div>
+<div><label for="smg">Quote margin (%)</label><input type="number" id="smg" min="0" inputmode="decimal"></div>
 </div>
-<div class="row"><button class="p" id="sv">Save settings</button><button class="a" id="ex">Export backup</button><label class="a" style="margin:0;cursor:pointer;color:inherit;font-size:16px">Import backup<input type="file" id="im" accept="application/json" hidden></label><button class="x" id="cl">Delete all data</button></div><p id="sm" class="mu" role="status"></p></div>
+<div class="row"><button class="p" id="sv">Save settings</button><button class="a" id="ex">Export backup</button><button class="a" id="xc">Export trips (CSV)</button><label class="a" style="margin:0;cursor:pointer;color:inherit;font-size:16px">Import backup<input type="file" id="im" accept="application/json" hidden></label><button class="x" id="cl">Delete all data</button></div><p id="sm" class="mu" role="status"></p></div>
 <div class="c"><h2>Fuel rates by date</h2><p class="mu">Each rate applies from its date until the next one. A trip uses the rate in force on its own date, so adding a new rate never changes older trips. Leave a fuel blank to keep its earlier rate. Nothing is fetched automatically: enter the price from your pump or the official notification.</p>
 <div class="g"><div><label for="sdt">Effective from</label><input type="date" id="sdt"></div>
 <div><label for="sd">Diesel per litre</label><input type="number" id="sd" min="0" inputmode="decimal"></div>
@@ -128,9 +131,9 @@ th,td{text-align:right;padding:7px 5px;border-bottom:1px solid var(--line);white
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const KEY="trip_ledger_pro_v2",UN={Diesel:"L",Petrol:"L",CNG:"kg",Electric:"kWh"},DEF=()=>({cur:"Rs",unit:"km",hr:0,slow:1.3});
-let S={v:[],t:[],c:DEF(),ph:[]};const mig=r=>Array.isArray(r.ph)?r.ph:(r.c&&r.c.fp&&Object.values(r.c.fp).some(x=>x)?[Object.assign({d:"2000-01-01"},r.c.fp)]:[]);
-try{const r=JSON.parse(localStorage.getItem(KEY));if(r){S.v=r.v||[];S.t=r.t||[];S.c=Object.assign(DEF(),r.c);S.ph=mig(r)}}catch(e){}
+const KEY="trip_ledger_pro_v2",UN={Diesel:"L",Petrol:"L",CNG:"kg",Electric:"kWh"},DEF=()=>({cur:"Rs",unit:"km",hr:0,slow:1.3,mg:15});
+let S={v:[],t:[],c:DEF(),ph:[],sr:[]};const mig=r=>Array.isArray(r.ph)?r.ph:(r.c&&r.c.fp&&Object.values(r.c.fp).some(x=>x)?[Object.assign({d:"2000-01-01"},r.c.fp)]:[]);
+try{const r=JSON.parse(localStorage.getItem(KEY));if(r){S.v=r.v||[];S.t=r.t||[];S.c=Object.assign(DEF(),r.c);S.ph=mig(r);S.sr=r.sr||[]}}catch(e){}
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value)||0,save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const F=()=>S.c.unit==="mi"?0.621371:1,D=k=>k*F(),Kk=x=>x/F(),ul=()=>S.c.unit,
 m=x=>(x<0?"−":"")+S.c.cur+" "+Math.round(Math.abs(x)).toLocaleString(),f1=x=>(isFinite(x)?x:0).toFixed(1),
@@ -179,13 +182,13 @@ $("vc").onclick=()=>{EV=null;$("av").textContent="Add vehicle";$("vc").style.dis
 $("mf").onchange=render;$("allt").onclick=()=>{$("mf").value="";render()};$("prt").onclick=()=>window.print();
 /* route planner */
 let RT=[],RN=[],ST=[],GC={},LAST=0,ET=null,EV=null;
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));let MAP=null,LY=null,LN=null,PTS=[],FIT=false;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));let MAP=null,LY=null,LN=null,PTS=[],FIT=false,SK="";
 async function nom(u){const w=Math.max(0,1100-(Date.now()-LAST));if(w)await sleep(w);LAST=Date.now();return(await fetch(u)).json()}
 async function geo(q){const k=q.toLowerCase();if(GC[k])return GC[k];const j=await nom("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q));if(!j.length)throw new Error("Place not found: "+q+".");return GC[k]=j[0]}
 function clearLine(){if(LN)LN.clearLayers()}
 function showLines(best){if(!MAP||!LN)return;clearLine();let all=[];RT.forEach((r,i)=>{if(!r.g)return;const g=r.g.map(c=>[c[1],c[0]]);all=all.concat(g);L.polyline(g,{color:i===best?"#0e6b4d":"#888",weight:i===best?6:3,opacity:i===best?.9:.6}).addTo(LN)});if(FIT&&all.length){MAP.fitBounds(L.latLngBounds(all),{padding:[30,30]})}FIT=false}
-function drawPts(){const last=PTS.length-1;
-$("plist").innerHTML=PTS.length?PTS.map((p,i)=>`<div class="row" style="align-items:center"><b>${i+1}</b><span style="flex:1 1 160px"><span class="mu">${i===0?"Start":i===last?"Destination":"Stop"}</span> ${e(p.n)}</span><button class="a" data-mu="${i}" type="button" aria-label="Move up">↑</button><button class="a" data-md="${i}" type="button" aria-label="Move down">↓</button><button class="x" data-rmp="${i}" type="button">Remove</button></div>`).join("")+`<div class="row"><button class="a" id="rclr" type="button">Clear all points</button></div>`:`<p class="mu">No points yet. Search a place above or tap the map.</p>`;
+function drawPts(){const last=PTS.length-1;drawSR();
+$("plist").innerHTML=PTS.length?PTS.map((p,i)=>`<div class="row" style="align-items:center"><b>${i+1}</b><span style="flex:1 1 160px"><span class="mu">${i===0?"Start":i===last?"Destination":"Stop"}</span> ${e(p.n)}</span><button class="a" data-mu="${i}" type="button" aria-label="Move up">↑</button><button class="a" data-md="${i}" type="button" aria-label="Move down">↓</button><button class="x" data-rmp="${i}" type="button">Remove</button></div>`).join("")+`<div class="row"><button class="a" id="rsv" type="button">Save this route</button><button class="a" id="rclr" type="button">Clear all points</button></div>`:`<p class="mu">No points yet. Search a place above or tap the map.</p>`;
 if(!MAP)return;LY.clearLayers();clearLine();
 PTS.forEach((p,i)=>L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:`<div class="pin">${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]})}).addTo(LY));
 if(PTS.length>1)MAP.fitBounds(L.latLngBounds(PTS.map(p=>[p.lat,p.lon])),{padding:[30,30]});else if(PTS.length===1)MAP.setView([PTS[0].lat,PTS[0].lon],10)}
@@ -206,6 +209,23 @@ if(a.rmp!==undefined){PTS.splice(+a.rmp,1);ptsChanged()}
 if(a.mu!==undefined&&+a.mu>0){const i=+a.mu;[PTS[i-1],PTS[i]]=[PTS[i],PTS[i-1]];ptsChanged()}
 if(a.md!==undefined&&+a.md<PTS.length-1){const i=+a.md;[PTS[i+1],PTS[i]]=[PTS[i],PTS[i+1]];ptsChanged()}
 if(ev.target.id==="rclr"){PTS=[];ptsChanged()}});
+function drawSR(){$("srl").innerHTML=S.sr.length?`<h2 style="margin-top:12px">Saved routes</h2>`+S.sr.map(r=>`<div class="row" style="align-items:center"><span style="flex:1 1 160px"><b>${e(r.name)}</b> <span class="mu">${r.pts.length} points</span></span><button class="a" data-lr="${r.id}" type="button">Load</button><button class="x" data-xr="${r.id}" type="button">Delete</button></div>`).join(""):""}
+function parseRoute(t){t=t.replace(/→|->|–|—/g," to ");const vi=t.split(/\s+via\s+/i);let main=vi[0].split(/\s+to\s+/i).map(x=>x.trim()).filter(Boolean);
+const via=(vi[1]||"").split(/,|;|\band\b/i).map(x=>x.trim()).filter(Boolean);
+if(main.length===1&&!via.length)main=t.split(/,|;/).map(x=>x.trim()).filter(Boolean);
+if(via.length&&main.length>=2)main.splice(main.length-1,0,...via);else if(via.length&&main.length===1)main=main.concat(via);return main}
+$("rtb").onclick=async()=>{const msg=$("rm"),nm=parseRoute($("rtx").value);
+if(nm.length<2){msg.textContent="Type at least two places, like: Karachi to Lahore via Hyderabad.";return}
+if(nm.length>12){msg.textContent="Maximum 12 places.";return}
+PTS=[];ptsChanged();const bad=[];
+for(let i=0;i<nm.length;i++){msg.textContent=`Finding place ${i+1} of ${nm.length}…`;try{const r=await geo(nm[i]);PTS.push({n:nm[i],lat:+r.lat,lon:+r.lon});ptsChanged()}catch(x){bad.push(nm[i])}}
+if(PTS.length<2){msg.textContent="Could not find enough places. Try clearer names, like Sukkur Pakistan.";return}
+SK=bad.join(", ");$("rgo").click()};
+$("rtx").addEventListener("keydown",ev=>{if(ev.key==="Enter")$("rtb").click()});
+document.addEventListener("click",ev=>{const a=ev.target.dataset;
+if(ev.target.id==="rsv"){if(PTS.length<2)return;const nm=prompt("Name for this route","");if(!nm)return;S.sr.push({id:"r"+Date.now(),name:nm.trim(),pts:PTS.map(p=>({n:p.n,lat:p.lat,lon:p.lon}))});save();drawSR()}
+if(a.lr){const r=S.sr.find(x=>x.id===a.lr);PTS=r.pts.map(p=>({...p}));ptsChanged()}
+if(a.xr&&confirm("Delete this saved route?")){S.sr=S.sr.filter(x=>x.id!==a.xr);save();drawSR()}});
 const gmapP=P=>"https://www.google.com/maps/dir/?api=1&origin="+P[0].lat+","+P[0].lon+"&destination="+P[P.length-1].lat+","+P[P.length-1].lon+(P.length>2?"&waypoints="+encodeURIComponent(P.slice(1,-1).map(p=>p.lat+","+p.lon).join("|")):"");
 $("rgo").onclick=async()=>{const msg=$("rm");if(!$("rv").value){msg.textContent="Add a vehicle first.";return}
 if(PTS.length<2){msg.textContent="Add at least a start and a destination.";return}
@@ -217,23 +237,23 @@ if(!rs){const j=await(await fetch(`https://router.project-osrm.org/route/v1/driv
 if(reord){PTS=order.map(i=>PTS[i]);drawPts()}
 const on=PTS.map(p=>p.n);RN=on;$("gm").href=gmapP(PTS);
 RT=rs.map(x=>({km:x.distance/1000,h:x.duration/3600*S.c.slow,toll:0,g:x.geometry&&x.geometry.coordinates,legs:x.legs.map((l,i)=>({a:on[i],b:on[i+1],km:l.distance/1000,h:l.duration/3600*S.c.slow}))}));
-msg.textContent=(reord?"Points were reordered for the shortest trip. ":"")+(PTS.length>2&&rs.length===1&&!reord?"Showing one route for your points in the order given. ":"")+"Enter toll for each route if you know it.";FIT=true;drawR()}
+msg.textContent=(SK?"Skipped (not found): "+SK+". ":"")+(reord?"Points were reordered for the shortest trip. ":"")+(PTS.length>2&&rs.length===1&&!reord?"Showing one route for your points in the order given. ":"")+"Enter toll for each route if you know it.";SK="";FIT=true;drawR()}
 catch(er){msg.textContent="Could not get routes: "+er.message+" Check your internet and try again."}};
 function rc(r){const v=V($("rv").value),k=r.km*($("rr").checked?2:1),h=r.h*($("rr").checked?2:1),fp=priceOn(v.fuel,tdy());
 const fuel=v.mil?k/v.mil*fp:0,dr=h*S.c.hr,wr=k*(v.wp||0),tl=r.toll*($("rr").checked?2:1);return{fuel,dr,wr,tl,tot:fuel+dr+wr+tl,k}}
 function drawR(){if(!RT.length)return;const C=RT.map(rc),best=C.reduce((b,c,i)=>c.tot<C[b].tot?i:b,0),fast=RT.reduce((b,r,i)=>r.h<RT[b].h?i:b,0),inc=n("ri");showLines(best);
-$("rres").innerHTML=RT.map((r,i)=>{const c=C[i];return`<div class="rt ${i===best?"best":""}">${i===best?'<span class="tag">Cheapest</span>':""}${i===fast?'<span class="tag">Fastest</span>':""}<b>Route ${i+1}</b>: ${Math.round(D(r.km))} ${ul()}, about ${f1(r.h)} h${r.legs&&r.legs.length>1?r.legs.map(l=>`<div class="mu">${e(l.a)} → ${e(l.b)}: ${Math.round(D(l.km))} ${ul()}, ${f1(l.h)} h</div>`).join(""):""}<br>Fuel ${m(c.fuel)} · Driver ${m(c.dr)} · Wear ${m(c.wr)} · Toll ${m(c.tl)}<br><b>Total ${m(c.tot)}</b> (${m(c.tot/D(c.k))} per ${ul()})${inc?` · Profit <b class="${cl(inc-c.tot)}">${m(inc-c.tot)}</b>`:""}<div class="row"><div><label for="tl${i}">Toll for this route</label><input type="number" id="tl${i}" data-ti="${i}" min="0" value="${r.toll||""}" inputmode="decimal"></div><button class="a" data-use="${i}">Use in trip form</button></div></div>`}).join("")+(inc?`<p class="mu">Break-even freight on the cheapest route: <b>${m(C[best].tot)}</b>.</p>`:"");
+$("rres").innerHTML=RT.map((r,i)=>{const c=C[i];return`<div class="rt ${i===best?"best":""}">${i===best?'<span class="tag">Cheapest</span>':""}${i===fast?'<span class="tag">Fastest</span>':""}<b>Route ${i+1}</b>: ${Math.round(D(r.km))} ${ul()}, about ${f1(r.h)} h${r.legs&&r.legs.length>1?r.legs.map(l=>`<div class="mu">${e(l.a)} → ${e(l.b)}: ${Math.round(D(l.km))} ${ul()}, ${f1(l.h)} h</div>`).join(""):""}<br>Fuel ${m(c.fuel)} · Driver ${m(c.dr)} · Wear ${m(c.wr)} · Toll ${m(c.tl)}<br><b>Total ${m(c.tot)}</b> (${m(c.tot/D(c.k))} per ${ul()}) · Quote at ${S.c.mg}% margin <b>${m(c.tot*(1+S.c.mg/100))}</b>${inc?` · Profit <b class="${cl(inc-c.tot)}">${m(inc-c.tot)}</b>`:""}<div class="row"><div><label for="tl${i}">Toll for this route</label><input type="number" id="tl${i}" data-ti="${i}" min="0" value="${r.toll||""}" inputmode="decimal"></div><button class="a" data-use="${i}">Use in trip form</button></div></div>`}).join("")+(inc?`<p class="mu">Break-even freight on the cheapest route: <b>${m(C[best].tot)}</b>.</p>`:"");
 const v=V($("rv").value);if(!v.mil||!priceOn(v.fuel,tdy()))$("rres").insertAdjacentHTML("afterbegin",`<div class="al">Costs are incomplete: set this vehicle's expected mileage and today's ${v.fuel} price.</div>`)}
 document.addEventListener("input",ev=>{if(ev.target.dataset.ti!==undefined){RT[ev.target.dataset.ti].toll=parseFloat(ev.target.value)||0;const id=ev.target.id,pos=ev.target.selectionStart;drawR();const x=$(id);if(x){x.focus();try{x.setSelectionRange(pos,pos)}catch(e){}}}});
 $("rr").onchange=drawR;$("ri").oninput=drawR;
 document.addEventListener("click",ev=>{if(ev.target.dataset.use!==undefined){const r=RT[ev.target.dataset.use];$("tv").value=$("rv").value;$("tr").value=RN.join(" → ");$("tk").value=Math.round(D(r.km)*($("rr").checked?2:1));$("tt").value=r.toll*($("rr").checked?2:1)||"";$("ti").value=$("ri").value;
 document.querySelector('nav [data-t="trips"]').click();labels();live()}});
 /* settings */
-function setUI(){const c=S.c;$("sc").value=c.cur;$("su").value=c.unit;$("sdt").value=tdy();$("sd").value=priceOn("Diesel",tdy())||"";$("sp").value=priceOn("Petrol",tdy())||"";$("sg").value=priceOn("CNG",tdy())||"";$("se").value=priceOn("Electric",tdy())||"";$("sh").value=c.hr||"";$("ss").value=c.slow}
-$("sv").onclick=()=>{S.c={cur:$("sc").value||"Rs",unit:$("su").value,hr:n("sh"),slow:Math.max(1,n("ss")||1.3)};save();render();$("sm").textContent="Settings saved."};
+function setUI(){const c=S.c;$("sc").value=c.cur;$("su").value=c.unit;$("sdt").value=tdy();$("sd").value=priceOn("Diesel",tdy())||"";$("sp").value=priceOn("Petrol",tdy())||"";$("sg").value=priceOn("CNG",tdy())||"";$("se").value=priceOn("Electric",tdy())||"";$("sh").value=c.hr||"";$("ss").value=c.slow;$("smg").value=c.mg}
+$("sv").onclick=()=>{S.c={cur:$("sc").value||"Rs",unit:$("su").value,hr:n("sh"),slow:Math.max(1,n("ss")||1.3),mg:$("smg").value===""?15:n("smg")};save();render();$("sm").textContent="Settings saved."};
 $("ex").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:"application/json"}));a.download="trip-ledger-backup.json";a.click()};
-$("im").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(!Array.isArray(j.v)||!Array.isArray(j.t))throw 0;S={v:j.v,t:j.t,c:Object.assign(DEF(),j.c),ph:mig(j)};save();setUI();render();$("sm").textContent="Backup imported."}catch(x){$("sm").textContent="That file is not a valid backup."}};r.readAsText(f)};
-$("cl").onclick=()=>{if(confirm("Delete all vehicles, trips and settings? Export a backup first.")){S={v:[],t:[],c:DEF(),ph:[]};save();setUI();render()}};
+$("im").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(!Array.isArray(j.v)||!Array.isArray(j.t))throw 0;S={v:j.v,t:j.t,c:Object.assign(DEF(),j.c),ph:mig(j),sr:j.sr||[]};save();setUI();render();$("sm").textContent="Backup imported."}catch(x){$("sm").textContent="That file is not a valid backup."}};r.readAsText(f)};
+$("cl").onclick=()=>{if(confirm("Delete all vehicles, trips and settings? Export a backup first.")){S={v:[],t:[],c:DEF(),ph:[],sr:[]};save();setUI();render()}};
 function drawPH(){const L=[...S.ph].sort((a,b)=>b.d.localeCompare(a.d));$("ph").innerHTML=L.length?`<tr><th>From date</th><th>Diesel/L</th><th>Petrol/L</th><th>CNG/kg</th><th>Electric/kWh</th><th></th></tr>`+L.map(r=>`<tr><td>${r.d==="2000-01-01"?"Earlier":r.d}</td>${["Diesel","Petrol","CNG","Electric"].map(f=>`<td>${r[f]?S.c.cur+" "+r[f]:"-"}</td>`).join("")}<td><button class="a" data-re="${r.d}">Edit</button> <button class="x" data-rd="${r.d}">Delete</button></td></tr>`).join(""):`<tr><td class="mu">No rates yet. Add your first rate above.</td></tr>`}
 $("rs").onclick=()=>{const d=$("sdt").value,m2=$("rm2"),F4=["Diesel","Petrol","CNG","Electric"],val={Diesel:n("sd"),Petrol:n("sp"),CNG:n("sg"),Electric:n("se")};
 if(!d){m2.textContent="Pick a date.";return}if(!F4.some(f=>val[f])){m2.textContent="Enter at least one rate.";return}
@@ -241,6 +261,10 @@ let o=S.ph.find(r=>r.d===d);if(!o){o={d};S.ph.push(o)}F4.forEach(f=>{if(val[f])o
 document.addEventListener("click",ev=>{const a=ev.target.dataset,x=a.re||a.rd;if(!x)return;
 if(a.rd&&confirm("Delete the rates for this date?")){S.ph=S.ph.filter(r=>r.d!==a.rd);save();render()}
 if(a.re){const r=S.ph.find(r=>r.d===a.re);$("sdt").value=r.d==="2000-01-01"?tdy():r.d;$("sd").value=r.Diesel||"";$("sp").value=r.Petrol||"";$("sg").value=r.CNG||"";$("se").value=r.Electric||"";window.scrollTo(0,document.body.scrollHeight)}});
+$("xc").onclick=()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"',u=ul();
+const R=[["Date","Vehicle","Route","Distance ("+u+")","Fuel qty","Fuel price","Fuel cost","Toll","Driver","Other","Wear","Total cost","Income","Profit","Received","Due"]];
+[...S.t].sort((a,b)=>a.d.localeCompare(b.d)).forEach(t=>{const v=V(t.v),p=t.p||priceOn(v.fuel,t.d),w=t.km*(v.wp||0),c=cost(t);R.push([t.d,v.name,t.r,D(t.km).toFixed(1),t.q.toFixed(2),p,Math.round(t.q*p),t.tl,t.dr,t.ot,Math.round(w),Math.round(c),t.inc,Math.round(t.inc-c),t.rc,Math.round(t.inc-t.rc)])});
+const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+R.map(r=>r.map(q).join(",")).join("\n")],{type:"text/csv"}));a.download="trips.csv";a.click()};
 $("td").value=tdy();drawPts();setUI();render();
 if("serviceWorker" in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("sw.js").catch(()=>{});
 </script>
